@@ -1,0 +1,90 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CloudFormation GitSync Deployment File
+# File: deployment.yaml
+#
+# This file is read by CloudFormation GitSync to configure the stack.
+# Any push to the linked branch that modifies iam-automation.yaml OR
+# this file will trigger an automatic stack update.
+#
+# GitSync Setup Steps (one-time, done via Console):
+#   1. CloudFormation → Stacks → Create Stack → "With GitSync"
+#   2. Connect your GitHub / CodeCommit / Bitbucket / GitLab repo
+#   3. Select branch (main) and point to this deployment file path
+#   4. CloudFormation provisions a service-linked role for Git access
+#
+# Reference:
+#   https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/git-sync.html
+# ─────────────────────────────────────────────────────────────────────────────
+
+template-file-path: ./iam-automation.yaml
+
+# Stack identifier
+stack-name: iam-automation-stack
+
+# Target region for the stack
+region: us-east-1
+
+# ── CAPABILITIES ──────────────────────────────────────────────────────────────
+# CAPABILITY_NAMED_IAM is REQUIRED whenever the template creates IAM resources
+# with explicit names (UserName, GroupName, RoleName, ManagedPolicyName).
+# Without this, CloudFormation will FAIL with:
+#   "Requires capabilities : [CAPABILITY_NAMED_IAM]"
+#
+# AWS forces this acknowledgment as a security gate to prevent accidental
+# privilege escalation from untrusted templates.
+# ─────────────────────────────────────────────────────────────────────────────
+capabilities:
+  - CAPABILITY_NAMED_IAM
+
+# ── PARAMETERS ────────────────────────────────────────────────────────────────
+# NOTE: Value must be a number (not a quoted string) to match the
+#       Type: Number parameter declared in iam-automation.yaml.
+# ─────────────────────────────────────────────────────────────────────────────
+parameters:
+  PasswordLength: 16
+
+# ── TAGS ──────────────────────────────────────────────────────────────────────
+# Applied to ALL resources in the stack. Supports governance, cost tracking,
+# and auditability across services.
+# ─────────────────────────────────────────────────────────────────────────────
+tags:
+  Project: BEM11-IAM-Lab
+  Environment: Lab
+  ManagedBy: GitSync-CloudFormation
+  Owner: CloudEngineering
+
+# ── STACK POLICY (ENABLED) ────────────────────────────────────────────────────
+# Prevents accidental deletion of IAM users and the shared secret during
+# stack updates. Stack policies are a CloudFormation best practice for
+# protecting stateful or security-sensitive resources.
+# ─────────────────────────────────────────────────────────────────────────────
+stack-policy:
+  statements:
+    - Effect: Deny
+      Action:
+        - Update:Delete
+        - Update:Replace
+      Principal: "*"
+      Resource: LogicalResourceId/EC2User1
+    - Effect: Deny
+      Action:
+        - Update:Delete
+        - Update:Replace
+      Principal: "*"
+      Resource: LogicalResourceId/EC2User2
+    - Effect: Deny
+      Action:
+        - Update:Delete
+        - Update:Replace
+      Principal: "*"
+      Resource: LogicalResourceId/S3User
+    - Effect: Deny
+      Action:
+        - Update:Delete
+        - Update:Replace
+      Principal: "*"
+      Resource: LogicalResourceId/IAMTempPasswordSecret
+    - Effect: Allow
+      Action: "Update:*"
+      Principal: "*"
+      Resource: "*"
