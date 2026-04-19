@@ -1,9 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: >
-  BEM11 Lab – Automating IAM Resource Creation via CloudFormation + GitSync.
-  Creates a shared temporary password in Secrets Manager, two IAM Groups
-  (S3 and EC2), three IAM users with console access and forced password reset
-  on first login.
+
+Description: "BEM11 Lab - Automating IAM Resource Creation via CloudFormation and GitSync. Creates IAM groups, users, and a shared temporary password in Secrets Manager."
 
 # ──────────────────────────────────────────────
 # METADATA
@@ -28,39 +25,33 @@ Parameters:
     Default: 16
     MinValue: 12
     MaxValue: 32
-    Description: >
-      Length of the auto-generated one-time password stored in Secrets Manager.
+    Description: "Length of the auto-generated one-time password stored in Secrets Manager"
 
 # ──────────────────────────────────────────────
 # RESOURCES
 # ──────────────────────────────────────────────
 Resources:
 
-  # ── 1. SECRETS MANAGER – One-Time Temporary Password ──────────────────────
   IAMTempPasswordSecret:
     Type: AWS::SecretsManager::Secret
-   
     Properties:
-      # Stack name suffix prevents naming collision if the stack is redeployed
       Name: !Sub "/iam/lab/temp-password-${AWS::StackName}"
-      Description: >
-        Auto-generated one-time password shared by all IAM lab users.
-        Each user is forced to change it on first console login.
+      Description: "Auto-generated temporary password shared by IAM lab users"
       GenerateSecretString:
         SecretStringTemplate: "{}"
         GenerateStringKey: password
         PasswordLength: !Ref PasswordLength
-        # Avoid characters that cause shell/console issues
-        ExcludeCharacters: '"@/\;:,'
-        ExcludePunctuation: false        # Allow symbols – satisfies complexity rules
-        RequireEachIncludedType: true    # upper + lower + number + symbol
+        ExcludeCharacters: '"@/;:,'
+        ExcludePunctuation: false
+        RequireEachIncludedType: true
       Tags:
         - Key: Project
           Value: BEM11-IAM-Lab
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ── 2. IAM GROUP – S3 (list buckets) ──────────────────────────────────────
+  # ── IAM GROUPS ──────────────────────────────
+
   S3UserGroup:
     Type: AWS::IAM::Group
     Properties:
@@ -70,16 +61,12 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: AllowListAllBuckets
-                Effect: Allow
+              - Effect: Allow
                 Action:
                   - s3:ListAllMyBuckets
                   - s3:GetBucketLocation
                 Resource: "*"
 
-  # ── 3. IAM GROUP – EC2 (list instances only) ──────────────────────────────
-  #    ec2-user1 belongs here; ec2-user2 gets an ADDITIONAL managed policy
-  #    that grants RunInstances, making the permission difference explicit.
   EC2UserGroup:
     Type: AWS::IAM::Group
     Properties:
@@ -89,8 +76,7 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: AllowDescribeEC2
-                Effect: Allow
+              - Effect: Allow
                 Action:
                   - ec2:DescribeInstances
                   - ec2:DescribeInstanceStatus
@@ -104,20 +90,17 @@ Resources:
                   - ec2:DescribeVpcs
                 Resource: "*"
 
-  # ── 4. MANAGED POLICY – EC2 Create (only attached to ec2-user2) ───────────
+  # ── IAM MANAGED POLICY ──────────────────────
+
   EC2CreateInstancePolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       ManagedPolicyName: EC2CreateInstancePolicy
-      Description: >
-        Grants permission to launch (create) EC2 instances.
-        Attached directly to ec2-user2 so that ec2-user2 is NOT prevented
-        from creating EC2 instances, while ec2-user1 is limited to listing.
+      Description: "Allows EC2 instance creation for ec2-user2"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: AllowRunInstances
-            Effect: Allow
+          - Effect: Allow
             Action:
               - ec2:RunInstances
               - ec2:CreateTags
@@ -128,16 +111,16 @@ Resources:
               - ec2:DescribeSubnets
               - ec2:DescribeVpcs
             Resource: "*"
-        
-          - Sid: AllowPassRoleToEC2Only
-            Effect: Allow
+
+          - Effect: Allow
             Action: iam:PassRole
             Resource: "*"
             Condition:
               StringEquals:
                 iam:PassedToService: ec2.amazonaws.com
 
-  # ── 5. IAM USER – ec2-user1 (EC2 list ONLY – cannot create instances) ─────
+  # ── IAM USERS ──────────────────────────────
+
   EC2User1:
     Type: AWS::IAM::User
     DependsOn: IAMTempPasswordSecret
@@ -146,16 +129,14 @@ Resources:
       Groups:
         - !Ref EC2UserGroup
       LoginProfile:
-        # Dynamic reference resolves the auto-generated password at deploy time
         Password: !Sub "{{resolve:secretsmanager:${IAMTempPasswordSecret}:SecretString:password}}"
-        PasswordResetRequired: true   # Forced password change on first login
+        PasswordResetRequired: true
       Tags:
         - Key: Project
           Value: BEM11-IAM-Lab
         - Key: Role
           Value: EC2-ReadOnly
 
-  # ── 6. IAM USER – ec2-user2 (EC2 list + CREATE instances) ────────────────
   EC2User2:
     Type: AWS::IAM::User
     DependsOn: IAMTempPasswordSecret
@@ -164,7 +145,7 @@ Resources:
       Groups:
         - !Ref EC2UserGroup
       ManagedPolicyArns:
-        - !Ref EC2CreateInstancePolicy   # Extra permission: can create EC2
+        - !Ref EC2CreateInstancePolicy
       LoginProfile:
         Password: !Sub "{{resolve:secretsmanager:${IAMTempPasswordSecret}:SecretString:password}}"
         PasswordResetRequired: true
@@ -174,7 +155,6 @@ Resources:
         - Key: Role
           Value: EC2-ReadWrite
 
-  # ── 7. IAM USER – s3-user (S3 list buckets only) ─────────────────────────
   S3User:
     Type: AWS::IAM::User
     DependsOn: IAMTempPasswordSecret
@@ -197,50 +177,21 @@ Resources:
 Outputs:
 
   TempPasswordSecretArn:
-    Description: ARN of the Secrets Manager secret holding the temporary password
     Value: !Ref IAMTempPasswordSecret
-    Export:
-      Name: !Sub "${AWS::StackName}-TempPasswordSecretArn"
-
-  TempPasswordSecretName:
-    Description: >
-      Retrieve the temp password with:
-      aws secretsmanager get-secret-value --secret-id /iam/lab/temp-password-<STACK_NAME> --query SecretString --output text
-    Value: !Sub "/iam/lab/temp-password-${AWS::StackName}"
 
   S3UserGroupName:
-    Description: IAM Group for S3 access
     Value: !Ref S3UserGroup
-    Export:
-      Name: !Sub "${AWS::StackName}-S3UserGroup"
 
   EC2UserGroupName:
-    Description: IAM Group for EC2 access
     Value: !Ref EC2UserGroup
-    Export:
-      Name: !Sub "${AWS::StackName}-EC2UserGroup"
 
   EC2User1Name:
-    Description: IAM user with EC2 list-only access
     Value: !Ref EC2User1
 
   EC2User2Name:
-    Description: IAM user with EC2 list + create access
     Value: !Ref EC2User2
 
   S3UserName:
-    Description: IAM user with S3 list-buckets access
     Value: !Ref S3User
 
-  ConsoleLoginURL:
-    Description: >
-      AWS Console sign-in URL – replace ACCOUNT_ID with your 12-digit account ID
-    Value: !Sub "https://${AWS::AccountId}.signin.aws.amazon.com/console"
-
-  LoginInstructions:
-    Description: How to log in with a newly created user
-    Value: !Sub >
-      1) Go to https://${AWS::AccountId}.signin.aws.amazon.com/console
-      2) Enter the username (ec2-user1 / ec2-user2 / s3-user)
-      3) Retrieve the temporary password from Secrets Manager: /iam/lab/temp-password-${AWS::StackName}
-      4) You will be prompted to set a new password immediately
+ 
