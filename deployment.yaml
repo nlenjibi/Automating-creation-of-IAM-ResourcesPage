@@ -1,4 +1,5 @@
-template-file-path: ./iam-automation.yaml
+
+template-file-path: iam-automation.yaml
 
 stack-name: iam-automation-demo
 
