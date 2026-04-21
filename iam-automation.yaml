@@ -1,10 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
-Description: "BEM11 Lab - Automating IAM Resource Creation via CloudFormation and GitSync. Creates IAM groups, users, and a shared temporary password in Secrets Manager."
+Description: "BEM11 Lab - IAM automation using CloudFormation, GitSync, Groups, and Permission"
 
-# ──────────────────────────────────────────────
 # METADATA
-# ──────────────────────────────────────────────
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -16,48 +14,39 @@ Metadata:
       PasswordLength:
         default: "Temporary Password Length"
 
-# ──────────────────────────────────────────────
 # PARAMETERS
-# ──────────────────────────────────────────────
+
 Parameters:
   PasswordLength:
     Type: Number
     Default: 16
     MinValue: 12
     MaxValue: 32
-    Description: "Length of the auto-generated one-time password stored in Secrets Manager"
 
-# ──────────────────────────────────────────────
+
 # RESOURCES
-# ──────────────────────────────────────────────
+
 Resources:
 
+  # ── TEMP PASSWORD ───────────────────────────
   IAMTempPasswordSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
       Name: !Sub "/iam/lab/temp-password-${AWS::StackName}"
-      Description: "Auto-generated temporary password shared by IAM lab users"
       GenerateSecretString:
         SecretStringTemplate: "{}"
         GenerateStringKey: password
         PasswordLength: !Ref PasswordLength
         ExcludeCharacters: '"@/;:,'
-        ExcludePunctuation: false
         RequireEachIncludedType: true
-      Tags:
-        - Key: Project
-          Value: BEM11-IAM-Lab
-        - Key: ManagedBy
-          Value: CloudFormation
 
-  # ── IAM GROUPS ──────────────────────────────
-
+  # ── S3 GROUP ────────────────────────────────
   S3UserGroup:
     Type: AWS::IAM::Group
     Properties:
       GroupName: S3UserGroup
       Policies:
-        - PolicyName: S3ListBucketsPolicy
+        - PolicyName: S3ListPolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -67,63 +56,50 @@ Resources:
                   - s3:GetBucketLocation
                 Resource: "*"
 
+  # ── EC2 GROUP (FULL ACCESS) ─────────────────
   EC2UserGroup:
     Type: AWS::IAM::Group
     Properties:
       GroupName: EC2UserGroup
       Policies:
-        - PolicyName: EC2ListInstancesPolicy
+        - PolicyName: EC2FullAccessPolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
                   - ec2:DescribeInstances
-                  - ec2:DescribeInstanceStatus
                   - ec2:DescribeImages
-                  - ec2:DescribeRegions
-                  - ec2:DescribeAvailabilityZones
                   - ec2:DescribeInstanceTypes
-                  - ec2:DescribeKeyPairs
                   - ec2:DescribeSecurityGroups
                   - ec2:DescribeSubnets
                   - ec2:DescribeVpcs
+                  - ec2:RunInstances
+                  - ec2:CreateTags
                 Resource: "*"
 
-  # ── IAM MANAGED POLICY ──────────────────────
-
-  EC2CreateInstancePolicy:
+  # ── PERMISSION BOUNDARY (EC2 READ ONLY) ────
+  EC2ReadOnlyBoundary:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      ManagedPolicyName: EC2CreateInstancePolicy
-      Description: "Allows EC2 instance creation for ec2-user2"
+      ManagedPolicyName: EC2ReadOnlyBoundary
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Action:
-              - ec2:RunInstances
-              - ec2:CreateTags
+              - ec2:DescribeInstances
               - ec2:DescribeImages
               - ec2:DescribeInstanceTypes
-              - ec2:DescribeKeyPairs
               - ec2:DescribeSecurityGroups
               - ec2:DescribeSubnets
               - ec2:DescribeVpcs
             Resource: "*"
 
-          - Effect: Allow
-            Action: iam:PassRole
-            Resource: "*"
-            Condition:
-              StringEquals:
-                iam:PassedToService: ec2.amazonaws.com
-
-  # ── IAM USERS ──────────────────────────────
+  # ── IAM USERS ───────────────────────────────
 
   EC2User1:
     Type: AWS::IAM::User
-    DependsOn: IAMTempPasswordSecret
     Properties:
       UserName: ec2-user1
       Groups:
@@ -131,33 +107,20 @@ Resources:
       LoginProfile:
         Password: !Sub "{{resolve:secretsmanager:${IAMTempPasswordSecret}:SecretString:password}}"
         PasswordResetRequired: true
-      Tags:
-        - Key: Project
-          Value: BEM11-IAM-Lab
-        - Key: Role
-          Value: EC2-ReadOnly
 
   EC2User2:
     Type: AWS::IAM::User
-    DependsOn: IAMTempPasswordSecret
     Properties:
       UserName: ec2-user2
       Groups:
         - !Ref EC2UserGroup
-      ManagedPolicyArns:
-        - !Ref EC2CreateInstancePolicy
+      PermissionsBoundary: !Ref EC2ReadOnlyBoundary
       LoginProfile:
         Password: !Sub "{{resolve:secretsmanager:${IAMTempPasswordSecret}:SecretString:password}}"
         PasswordResetRequired: true
-      Tags:
-        - Key: Project
-          Value: BEM11-IAM-Lab
-        - Key: Role
-          Value: EC2-ReadWrite
 
   S3User:
     Type: AWS::IAM::User
-    DependsOn: IAMTempPasswordSecret
     Properties:
       UserName: s3-user
       Groups:
@@ -165,11 +128,6 @@ Resources:
       LoginProfile:
         Password: !Sub "{{resolve:secretsmanager:${IAMTempPasswordSecret}:SecretString:password}}"
         PasswordResetRequired: true
-      Tags:
-        - Key: Project
-          Value: BEM11-IAM-Lab
-        - Key: Role
-          Value: S3-ReadOnly
 
 # ──────────────────────────────────────────────
 # OUTPUTS
@@ -179,19 +137,11 @@ Outputs:
   TempPasswordSecretArn:
     Value: !Ref IAMTempPasswordSecret
 
-  S3UserGroupName:
-    Value: !Ref S3UserGroup
-
-  EC2UserGroupName:
-    Value: !Ref EC2UserGroup
-
-  EC2User1Name:
+  EC2User1:
     Value: !Ref EC2User1
 
-  EC2User2Name:
+  EC2User2:
     Value: !Ref EC2User2
 
-  S3UserName:
+  S3User:
     Value: !Ref S3User
-
- 
